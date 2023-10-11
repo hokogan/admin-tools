@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# how to exit with error
+errexit() {
+  echo $@
+  exit 1
+}
+
+# check for dependencies
+for dependency in cat false getopt ssh tmux true; do
+  command -v &>/dev/null || errexit "Missing dependency: $dependency"
+done
+
+usage() {
+# this here-doc contains literal tabs for beauty
+  cat <<-EOF
+		Usage: ${0##*/} [OPTION] host1 [host2 ...]
+		Options:
+		  -c|--color COLOR
+		    set the window highlight color to something other than blue. see tmux(1) for
+		    color information.
+		  -f|--file FILE
+		    read hostnames from FILE in addition to command line arguments
+		  -h|--help
+		    show this help
+		  -m|--mfa
+		    log in to each host first for MFA or other host-specific pre-login rituals
+		  -s|--session
+		    session name (defaults to 'tssh')
+		  -w|--window
+		    window name
+	EOF
+}
+
+# set defaults
+color=blue
+mfa=false
+sessionname=tssh
+
+# get options
+opts=$(getopt -o c:f:hms:w: -l color:,file:,help,mfa,session:,window: -n ${0##*/} -- "$@")
+if [[ $? -ne 0 ]]; then
+  usage
+  exit 1
+fi
+eval set -- "$opts"
+
+# parse options
+while [[ $1 != '--' ]]; do
+  case $1 in
+    -c|--color)
+# rudimentary input sanitization
+      color=${2//[^#[:alnum:]]}
+      shift 2
+      ;;
+    -f|--file)
+      hostfile="$2"
+      [[ -r "$hostfile" ]] || errexit "Cannot read file $hostfile."
+      shift 2
+      ;;
+    -m|--mfa)
+      mfa=true
+      shift
+      ;;
+    -s|--session)
+# rudimentary input sanitization
+      sessionname="${2//[,:;]}"
+      shift 2
+      ;;
+    -w|--window)
+# rudimentary input sanitization
+      windowname="${2//[,:;]}"
+      shift 2
+      ;;
+    *|-h|--help)
+      usage
+      exit 0
+      ;;
+  esac
+done
+shift
+
+[[ -z $1 && -z "$hostfile" ]] && errexit "Must specify at least one host."
+
+# read hosts from $hostfile into args for simplicity and because of problems
+# reading stdin with ssh login. this also excludes comments and blank lines by
+# default
+if [[ -n "$hostfile" ]]; then
+  while read host; do
+    eval set -- "$@" "$host"
+  done < "$hostfile"
+fi
+
+# disable complaint about nesting tmux
+unset TMUX
+
+# if mfa then loop through hosts to perform interactive logins
+if $mfa; then
+  for host in $@; do
+    echo Checking ${host}...
+# : might not port well to systems running a different default shell
+    ssh $host :
+  done
+fi
+
+# create detached tmux session and initiate first connection
+tmux new-session -d -s "$sessionname" "ssh $1" || {
+  i=0
+  until tmux new-session -d -s "${sessionname}${i}" "ssh $1";do
+    if [[ $i -ge 10 ]]; then
+# probably too many tssh sessions running
+      echo "Could not start tmux session '$sessionname' or '$sessionname{0..9}'. Giving up."
+      exit 1
+    fi
+    ((i++))
+  done
+  sessionname="${sessionname}$i"
+}
+shift
+
+while [[ -n $1 ]]; do
+  tmux split-window -t "$sessionname" "ssh $1"
+  shift
+  tmux select-layout -t "$sessionname" tiled
+done
+
+[[ -n $windowname ]] && tmux rename-window -t "$sessionname" "$windowname"
+tmux select-layout -t "$sessionname" tiled
+tmux set-window-option -t "$sessionname" synchronize-panes on
+tmux set-window-option -t "$sessionname" window-status-style bg=$color
+tmux set-window-option -t "$sessionname" pane-active-border-style fg=$color
+tmux attach -t "$sessionname"
