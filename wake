@@ -1,0 +1,23 @@
+#!/bin/bash
+
+if ! command -v wakeonlan &>/dev/null; then
+  echo "'wakeonlan' not on PATH"
+  exit 1
+fi
+
+declare -A TARGETS=(\
+ [system1]="MAC"\
+ [system2]="MAC"\
+)
+
+if [ "$1" != "" ]; then
+  if [ "${TARGETS[$1]}" != "" ]; then
+    wakeonlan ${TARGETS[$1]}
+    exit 0
+  fi
+fi
+
+select target in ${!TARGETS[*]}; do
+  wakeonlan ${TARGETS[$target]}
+  break
+done
