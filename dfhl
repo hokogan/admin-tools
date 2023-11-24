@@ -1,0 +1,32 @@
+#!/bin/bash
+
+CAUTION=90
+WARNING=95
+
+prnthead() {
+  # if $HEADER is not empty, print and empty it
+  [ "x$HEADER" != "x" ] && echo "$HEADER"
+  unset HEADER
+}
+
+while read; do
+  # first line of df is okay. check for and store it
+  [ $((i++)) -eq 0 ] && {
+    HEADER=$REPLY
+    continue
+  }
+  # get fifth element of df readout, called USAGE
+  USAGE=$(echo "$REPLY" | grep -o '[0-9]\+%')
+  # if USAGE >= WARNING then substitute USAGE% with red ansi USAGE% in REPLY
+  if [ ${USAGE%\%} -ge $WARNING ]; then
+    prnthead
+    echo "$REPLY" | sed s/$USAGE/`echo -e "\033[7;31m$USAGE\033[0m"`/
+  # else if USAGE >= CAUTION then sub USAGE% with yellow ansi USAGE% in REPLY
+  elif [ ${USAGE%\%} -ge $CAUTION ]; then
+    prnthead
+    echo "$REPLY" | sed s/$USAGE/`echo -e "\033[7;33m$USAGE\033[0m"`/
+  fi
+done < <(df -lht ext4)
+
+[ "x$HEADER" != "x" ] && echo "Disk usage OK."
+exit 0
