@@ -1,0 +1,142 @@
+#!/usr/bin/bash
+
+# read output with [[n]n]n% in it and highlight red or yellow based on critical or warning values. print only matching
+# lines, with optional printing of a specified number of header lines.
+#
+# how to exit with error
+errexit() {
+  echo "$@"
+  exit 1
+}
+
+# check for dependencies
+for dependency in false getopt sed true; do
+  command -v &>/dev/null || errexit "Missing dependency: $dependency"
+done
+
+usage() {
+# this here-doc contains literal tabs for beauty
+  cat <<-EOF
+		Usage: [INPUT] | ${0##*/} [OPTION]
+		Options:
+		  -a|--all
+		    Print all lines of input (mostly useful for diagnostics)
+		  -c|--critical INTEGER
+		    Critical value threshold
+		  -f|--force
+		    Force output of -l|--lines even if no values exceed thresholds
+		  -h|--help
+		    show this help
+		  -l|--lines INTEGER
+		    Print INTEGER lines of input header
+		  -w|--warning
+		    Warning value threshold
+	EOF
+}
+
+# set defaults
+critical=95
+warning=83
+print=false
+printAll=false
+lines=0
+
+# get options
+opts=$(getopt -o ac:fhl:w: -l all,critical:,force,help,lines:,warning: -n ${0##*/} -- "$@")
+if [[ $? -ne 0 ]]; then
+  usage
+  exit 1
+fi
+eval set -- "$opts"
+
+# parse options
+while [[ $1 != '--' ]]; do
+  case $1 in
+    -a|--all)
+      printAll=true
+      print=true
+      shift
+      ;;
+    -c|--critical)
+# rudimentary input sanitization
+      critical=${2//[^[:digit:]]}
+# cannot compare percentage over 100
+      [[ $critical -gt 100 ]] && errexit "Critical threshold cannot exceed 100%."
+      shift 2
+      ;;
+    -l|--lines)
+# rudimentary input sanitization
+      lines=${2//[^[:digit:]]}
+      shift 2
+      ;;
+    -f|--force)
+      print=true
+      shift
+      ;;
+    -w|--warning)
+# rudimentary input sanitization
+      warning=${2//[^[:digit:]]}
+# cannot compare percentage over 100
+      [[ $warning -gt 100 ]] && errexit "Warning threshold cannot exceed 100%."
+      shift 2
+      ;;
+    *)
+      usage
+      exit 0
+      ;;
+  esac
+done
+shift
+
+# if -f|--force and not -a|--all, $lines must be > 0
+$print && [[ ! $lines -gt 0 ]] && ! $printAll && errexit "-l|--lines must be set when using -f|--force."
+
+lineNum=0
+# take stdin
+while read line; do
+
+# add header (--lines) to output and skip comparisons
+  if [[ $((++lineNum)) -le $lines ]]; then
+    [[ -n $output ]] && output+="
+"
+    output+="$line"
+    continue
+  fi
+
+# (re)initialize $lineChanged status
+  lineChanged=false
+
+# (re)initialize $match index
+  match=0
+
+# examine each word (token) in $line
+  for tok in $line; do
+
+# if token is represeted as a percentage
+    if [[ $tok =~ [0-9]{1,3}% ]]; then
+
+# get the value of $tok (remove %)
+      tokVal=${tok%\%}
+
+# compare token value against thresholds and replace with color codes, incrementing match index
+      if [[ $tokVal -ge $critical ]]; then
+        line="$(sed s/$tok/$(echo -e "\033[7;31m${tok}\033[0m")/$((++match)) <<<"$line")"
+        lineChanged=true
+      elif [[ $tokVal -ge $warning ]]; then
+        line="$(sed s/$tok/$(echo -e "\033[7;33m${tok}\033[0m")/$((++match)) <<<"$line")"
+        lineChanged=true
+      fi
+    fi
+  done
+
+# if $lineChanged or $printAll then add $line to $output and trigger output printing
+  if $lineChanged || $printAll; then
+    [[ -n $output ]] && output+="
+"
+    output+="$line"
+    print=true
+  fi
+done
+
+# print output if $print
+$print && echo "$output"
