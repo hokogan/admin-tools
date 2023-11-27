@@ -21,7 +21,7 @@ usage() {
 		Options:
 		  -a|--all
 		    Print all lines of input (mostly useful for diagnostics)
-		  -c|--critical INTEGER
+		  -c|--critical INTEGER (default 95)
 		    Critical value threshold
 		  -f|--force
 		    Force output of -l|--lines even if no values exceed thresholds
@@ -30,7 +30,7 @@ usage() {
 		  -l|--lines INTEGER
 		    Print INTEGER lines of input header
 		  -w|--warning
-		    Warning value threshold
+		    Warning value threshold (default 83)
 	EOF
 }
 
